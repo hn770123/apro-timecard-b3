@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ヘルパー関数：ユーザーの権限をチェック
+    function hasRole(role) {
+      return request.auth != null && 
+             role in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roles;
+    }
+    
+    // ユーザーコレクション
+    match /users/{userId} {
+      // 認証済みユーザーは全ユーザーを読み取り可能
+      allow read: if request.auth != null;
+      
+      // 管理者権限を持つユーザーのみ書き込み可能
+      allow write: if hasRole('admin');
+    }
+    
+    // タイムカードコレクション
+    match /timecards/{timecardId} {
+      // 認証済みユーザーは全タイムカードを読み取り可能
+      allow read: if request.auth != null;
+      
+      // 作成：自分のタイムカードのみ作成可能
+      allow create: if request.auth != null && 
+                       request.resource.data.userId == request.auth.uid;
+      
+      // 更新：以下のいずれかの条件を満たす場合
+      allow update: if request.auth != null && (
+        // 1. 自分のタイムカードで、承認ステータスが下書きまたは却下の場合
+        (request.resource.data.userId == request.auth.uid && 
+         resource.data.approvalStatus in ['draft', 'rejected']) ||
+        
+        // 2. 承認者権限を持つ場合（承認・却下・取り消し操作）
+        hasRole('approver')
+      );
+      
+      // 削除は禁止（データの永続性を保つため）
+      allow delete: if false;
+    }
+  }
+}
